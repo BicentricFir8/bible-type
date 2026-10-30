@@ -1,80 +1,19 @@
-
 "use client";
 
-import Navbar from "../components/Navbar";
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { createClient } from "../../lib/supabase/client";
-
-type Progress = {
-  coins: number;
-  owned_cars: string[];
-  selected_car: string;
-};
-
-const CARS = [
-  {
-    id: "blue",
-    name: "Blue Racer",
-    price: 0,
-    color: "#38bdf8",
-    description: "Your dependable starter car.",
-  },
-  {
-    id: "gold",
-    name: "Gold Cruiser",
-    price: 250,
-    color: "#facc15",
-    description: "A golden upgrade for dedicated racers.",
-  },
-  {
-    id: "red",
-    name: "Red Comet",
-    price: 500,
-    color: "#f87171",
-    description: "A bold ride for serious Bible Type players.",
-  },
-];
-
-function CarPreview({ color }: { color: string }) {
-  return (
-    <svg
-      viewBox="0 0 240 120"
-      role="img"
-      aria-label="Car preview"
-      style={{ width: "100%", maxWidth: "240px" }}
-    >
-      <ellipse cx="120" cy="99" rx="92" ry="10" fill="#020617" opacity=".45" />
-      <path
-        d="M25 72 L37 51 Q42 43 57 40 L83 21 Q89 16 102 16 L145 16 Q159 17 168 31 L190 48 L207 53 Q219 58 220 72 L215 86 L24 86 Z"
-        fill={color}
-        stroke="#e2e8f0"
-        strokeWidth="2"
-      />
-      <path
-        d="M91 25 L143 25 Q153 26 161 39 L174 49 L73 49 Z"
-        fill="#172554"
-        stroke="#cbd5e1"
-        strokeWidth="2"
-      />
-      <path d="M117 25 L117 49" stroke="#cbd5e1" strokeWidth="2" />
-      <path d="M29 66 L52 66" stroke="#f8fafc" strokeWidth="5" />
-      <path d="M193 64 L215 64" stroke="#fb7185" strokeWidth="5" />
-      <circle cx="66" cy="85" r="19" fill="#0f172a" stroke="#94a3b8" strokeWidth="3" />
-      <circle cx="66" cy="85" r="8" fill="#cbd5e1" />
-      <circle cx="180" cy="85" r="19" fill="#0f172a" stroke="#94a3b8" strokeWidth="3" />
-      <circle cx="180" cy="85" r="8" fill="#cbd5e1" />
-    </svg>
-  );
-}
+import { CHARACTERS } from "../../lib/characters";
 
 export default function GaragePage() {
-  const router = useRouter();
-  const [progress, setProgress] = useState<Progress | null>(null);
+  const [ownedCharacters, setOwnedCharacters] = useState<string[]>([
+    "disciple",
+  ]);
+  const [selectedCharacterId, setSelectedCharacterId] =
+    useState("disciple");
+  const [coins, setCoins] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
-  const [busyCar, setBusyCar] = useState("");
   const [message, setMessage] = useState("");
-  const [selectedCar, setSelectedCar] = useState("blue");
 
   useEffect(() => {
     async function loadGarage() {
@@ -82,331 +21,496 @@ export default function GaragePage() {
 
       const {
         data: { user },
-        error: userError,
       } = await supabase.auth.getUser();
 
-      if (userError || !user) {
-        router.replace("/login");
+      if (!user) {
+        setMessage("Sign in to use your character garage.");
+        setLoading(false);
         return;
       }
 
       const { data, error } = await supabase
         .from("player_progress")
-        .select("coins, owned_cars, selected_car")
+        .select("coins, owned_characters, selected_character")
         .eq("user_id", user.id)
         .maybeSingle();
 
       if (error) {
-        setMessage("Couldn't load your garage. Please refresh.");
-      } else {
-        const loadedProgress = data ?? {
-          coins: 0,
-          owned_cars: ["blue"],
-          selected_car: "blue",
-        };
+        setMessage(error.message);
+      } else if (data) {
+        setCoins(data.coins ?? 0);
 
-        setProgress(loadedProgress);
+        if (Array.isArray(data.owned_characters)) {
+          setOwnedCharacters(data.owned_characters);
+        }
 
-        setSelectedCar(
-  loadedProgress.selected_car &&
-  loadedProgress.owned_cars.includes(loadedProgress.selected_car)
-    ? loadedProgress.selected_car
-    : "blue"
-);
+        if (
+          CHARACTERS.some(
+            (character) => character.id === data.selected_character
+          )
+        ) {
+          setSelectedCharacterId(data.selected_character);
+        }
       }
 
       setLoading(false);
     }
 
-    loadGarage();
-  }, [router]);
+    loadGarage().catch((error) => {
+      console.error("Could not load garage:", error);
+      setMessage("Could not load your garage.");
+      setLoading(false);
+    });
+  }, []);
 
-  async function buyCar(carId: string) {
-    setBusyCar(carId);
+  async function buyCharacter(characterId: string) {
     setMessage("");
 
     const supabase = createClient();
-    const { data, error } = await supabase.rpc("buy_car", {
-      p_car_id: carId,
+
+    const { data, error } = await supabase.rpc("buy_character", {
+      p_character_id: characterId,
     });
 
     if (error) {
       setMessage(error.message);
-      setBusyCar("");
       return;
     }
 
-    setProgress((previous) =>
-      previous
-        ? {
-            ...previous,
-            coins: data.coins_remaining,
-            owned_cars: data.owned_cars,
-          }
-        : previous
-    );
+    if (data?.owned_characters) {
+      setOwnedCharacters(data.owned_characters);
+    }
 
-    setSelectedCar(carId);
-    setMessage(`${CARS.find((car) => car.id === carId)?.name} unlocked!`);
-    setBusyCar("");
+    if (typeof data?.total_coins === "number") {
+      setCoins(data.total_coins);
+    }
+
+    setMessage("Character unlocked!");
   }
 
-  if (loading) {
-    return <main style={styles.page}>Loading your garage...</main>;
-  }
+  async function selectCharacter(characterId: string) {
+    setMessage("");
 
-  if (!progress) {
-    return (
-      <main style={styles.page}>
-        <p>{message || "Couldn't load your player progress."}</p>
-        <button style={styles.button} onClick={() => router.push("/dashboard")}>
-          Back to Dashboard
-        </button>
-      </main>
+    const supabase = createClient();
+
+    const { error } = await supabase.rpc("select_character", {
+      p_character_id: characterId,
+    });
+
+    if (error) {
+      setMessage(error.message);
+      return;
+    }
+
+    setSelectedCharacterId(characterId);
+    setMessage(
+      `${CHARACTERS.find((character) => character.id === characterId)?.name} selected!`
     );
   }
 
   return (
-    <main style={styles.page}>
-     <Navbar />
+    <main className="garage-page">
+      <header className="garage-header">
+        <Link href="/" className="brand">
+          <span className="brand-icon">B</span>
+          <span>
+            <span className="brand-name">BIBLE TYPE</span>
+            <span className="brand-subtitle">SCRIPTURE RACING</span>
+          </span>
+        </Link>
 
-      <section style={styles.intro}>
-        <p style={styles.eyebrow}>YOUR COLLECTION</p>
-        <h2 style={styles.title}>Car Garage</h2>
-        <p style={styles.subtitle}>
-          Earn coins by racing and unlock new rides.
+        <Link href="/" className="back-link">
+          ← BACK TO RACING
+        </Link>
+      </header>
+
+      <section className="garage-hero">
+        <div className="section-kicker">YOUR COLLECTION</div>
+        <h1>Character Garage</h1>
+        <p>
+          Unlock biblical figures, build your collection, and choose who
+          represents you on the track.
         </p>
-        <div style={styles.balance}>
-          <span style={styles.coinIcon}>C</span>
-          <strong>{progress.coins.toLocaleString()}</strong>
-          <span>coins available</span>
+
+        <div className="coin-display">
+          <span>YOUR COINS</span>
+          <strong>
+            {loading
+              ? "..."
+              : coins === null
+                ? "—"
+                : coins.toLocaleString()}
+          </strong>
         </div>
       </section>
 
       {message && (
-        <p role="status" style={styles.message}>
+        <p className="garage-message" role="status">
           {message}
         </p>
       )}
 
-      <section style={styles.grid}>
-        {CARS.map((car) => {
-          const owned = progress.owned_cars.includes(car.id);
-          const selected = selectedCar === car.id;
+      {loading ? (
+        <div className="loading-message">LOADING YOUR COLLECTION...</div>
+      ) : (
+        <section className="character-grid">
+          {CHARACTERS.map((character) => {
+            const owned = ownedCharacters.includes(character.id);
+            const selected = selectedCharacterId === character.id;
 
-          return (
-            <article key={car.id} style={styles.carCard}>
-              <div style={styles.carImage}>
-                <CarPreview color={car.color} />
-              </div>
-
-              <h3 style={styles.carName}>{car.name}</h3>
-              <p style={styles.description}>{car.description}</p>
-
-              <p style={styles.price}>
-                {car.price === 0 ? "FREE STARTER" : `${car.price} COINS`}
-              </p>
-
-              {owned ? (
-                <button
-                  style={selected ? styles.selectedButton : styles.button}
-                 onClick={async () => {
-  setMessage("");
-  setBusyCar(car.id);
-
-  const supabase = createClient();
-
-  const { error } = await supabase.rpc("select_car", {
-    p_car_id: car.id,
-  });
-
-  if (error) {
-    setMessage(error.message);
-    setBusyCar("");
-    return;
-  }
-
-  setSelectedCar(car.id);
-  setProgress((previous) =>
-    previous
-      ? { ...previous, selected_car: car.id }
-      : previous
-  );
-
-  setMessage(`${car.name} selected for your next race.`);
-  setBusyCar("");
-}}
+            return (
+              <article
+                className={`character-card ${selected ? "selected" : ""}`}
+                key={character.id}
+              >
+                <div
+                  className="character-avatar"
+                  style={{
+                    color: character.color,
+                    borderColor: character.color,
+                    background: `${character.color}15`,
+                  }}
                 >
-                  {selected ? "SELECTED" : "SELECT CAR"}
-                </button>
-              ) : (
-                <button
-                  style={styles.button}
-                  disabled={busyCar !== ""}
-                  onClick={() => buyCar(car.id)}
-                >
-                  {busyCar === car.id
-                    ? "PURCHASING..."
-                    : `UNLOCK FOR ${car.price}`}
-                </button>
-              )}
-            </article>
-          );
-        })}
-      </section>
+                  {character.initials}
+                </div>
 
-      <p style={styles.footer}>
-        Car selection is currently saved on this page. Next, we'll connect
-        your selected car to the actual race.
-      </p>
+                <div className="rarity" style={{ color: character.color }}>
+                  {character.rarity}
+                </div>
+
+                <h2>{character.name}</h2>
+                <p className="character-title">{character.title}</p>
+                <p className="character-description">
+                  {character.description}
+                </p>
+
+                {selected ? (
+                  <div className="selected-label">✓ CURRENTLY SELECTED</div>
+                ) : owned ? (
+                  <button
+                    className="select-button"
+                    onClick={() => selectCharacter(character.id)}
+                  >
+                    SELECT CHARACTER
+                  </button>
+                ) : (
+                  <button
+                    className="buy-button"
+                    onClick={() => buyCharacter(character.id)}
+                    disabled={coins !== null && coins < character.price}
+                  >
+                    UNLOCK · {character.price.toLocaleString()} COINS
+                  </button>
+                )}
+              </article>
+            );
+          })}
+        </section>
+      )}
+
+      <footer className="garage-footer">
+        BIBLE TYPE · LEARN · TYPE · RACE
+      </footer>
+
+      <style jsx global>{`
+        * {
+          box-sizing: border-box;
+        }
+
+        body {
+          margin: 0;
+          background: #08111f;
+          color: #edf3ff;
+          font-family: Arial, Helvetica, sans-serif;
+        }
+
+        .garage-page {
+          min-height: 100vh;
+          padding: 24px clamp(14px, 4vw, 55px);
+          background:
+            radial-gradient(ellipse at 50% 0%, rgba(30, 92, 140, 0.2), transparent 40%),
+            #08111f;
+        }
+
+        .garage-header {
+          max-width: 1350px;
+          margin: 0 auto;
+          padding-bottom: 22px;
+          border-bottom: 1px solid #24344a;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 15px;
+        }
+
+        .brand {
+          display: flex;
+          align-items: center;
+          gap: 11px;
+          color: inherit;
+          text-decoration: none;
+        }
+
+        .brand-icon {
+          width: 43px;
+          height: 43px;
+          display: grid;
+          place-items: center;
+          border-radius: 12px;
+          background: #f4bd4f;
+          color: #111827;
+          font-size: 25px;
+          font-weight: 1000;
+          font-style: italic;
+        }
+
+        .brand-name,
+        .brand-subtitle {
+          display: block;
+        }
+
+        .brand-name {
+          font-size: 19px;
+          font-weight: 950;
+          letter-spacing: 1.8px;
+        }
+
+        .brand-subtitle {
+          margin-top: 4px;
+          color: #7e94ad;
+          font-size: 9px;
+          font-weight: 800;
+          letter-spacing: 2.2px;
+        }
+
+        .back-link {
+          padding: 11px 14px;
+          border: 1px solid #34465c;
+          border-radius: 7px;
+          color: #f4bd4f;
+          text-decoration: none;
+          font-size: 10px;
+          font-weight: 900;
+          letter-spacing: 1px;
+        }
+
+        .garage-hero {
+          max-width: 1350px;
+          margin: 0 auto;
+          padding: 45px 0 30px;
+          position: relative;
+        }
+
+        .section-kicker {
+          color: #eab84e;
+          font-size: 10px;
+          font-weight: 900;
+          letter-spacing: 2px;
+        }
+
+        .garage-hero h1 {
+          margin: 12px 0;
+          font-size: clamp(32px, 5vw, 48px);
+          font-weight: 950;
+          letter-spacing: -1.8px;
+        }
+
+        .garage-hero p {
+          max-width: 620px;
+          color: #93a6bd;
+          font-size: 14px;
+          line-height: 1.7;
+        }
+
+        .coin-display {
+          display: inline-flex;
+          flex-direction: column;
+          gap: 6px;
+          margin-top: 15px;
+          padding: 13px 18px;
+          border: 1px solid #5b4a29;
+          border-radius: 8px;
+          background: rgba(244, 189, 79, 0.08);
+        }
+
+        .coin-display span {
+          color: #a9956d;
+          font-size: 9px;
+          font-weight: 900;
+          letter-spacing: 1.5px;
+        }
+
+        .coin-display strong {
+          color: #f4bd4f;
+          font-size: 22px;
+          font-weight: 950;
+        }
+
+        .garage-message {
+          max-width: 1350px;
+          margin: 0 auto 20px;
+          color: #65dfa7;
+          font-size: 12px;
+          font-weight: 800;
+        }
+
+        .loading-message {
+          padding: 50px;
+          color: #91a5bc;
+          text-align: center;
+          font-size: 12px;
+          letter-spacing: 1px;
+        }
+
+        .character-grid {
+          max-width: 1350px;
+          margin: 0 auto;
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+          gap: 17px;
+        }
+
+        .character-card {
+          min-width: 0;
+          padding: 22px;
+          border: 1px solid #29394e;
+          border-radius: 12px;
+          background: linear-gradient(145deg, #111e30, #0e1929);
+          text-align: center;
+          transition: border-color 0.15s ease, transform 0.15s ease;
+        }
+
+        .character-card:hover {
+          transform: translateY(-3px);
+          border-color: #536981;
+        }
+
+        .character-card.selected {
+          border-color: #d9a83f;
+          background: linear-gradient(145deg, #29251c, #111e30);
+        }
+
+        .character-avatar {
+          width: 78px;
+          height: 78px;
+          display: grid;
+          place-items: center;
+          margin: 0 auto 15px;
+          border: 2px solid;
+          border-radius: 50%;
+          font-size: 23px;
+          font-weight: 950;
+        }
+
+        .rarity {
+          font-size: 9px;
+          font-weight: 950;
+          letter-spacing: 1.5px;
+          text-transform: uppercase;
+        }
+
+        .character-card h2 {
+          margin: 10px 0 5px;
+          color: #f0f5fc;
+          font-size: 19px;
+          font-weight: 900;
+        }
+
+        .character-title {
+          margin: 0;
+          color: #e1b955;
+          font-size: 11px;
+          font-weight: 800;
+        }
+
+        .character-description {
+          min-height: 55px;
+          margin: 13px 0 18px;
+          color: #8fa3b9;
+          font-size: 11px;
+          line-height: 1.6;
+        }
+
+        .select-button,
+        .buy-button {
+          width: 100%;
+          min-height: 42px;
+          padding: 10px;
+          border-radius: 7px;
+          font-size: 9px;
+          font-weight: 950;
+          letter-spacing: 0.7px;
+          cursor: pointer;
+        }
+
+        .select-button {
+          color: #c4d4e6;
+          border: 1px solid #43566d;
+          background: #17263a;
+        }
+
+        .buy-button {
+          color: #171a20;
+          border: 1px solid #f4bd4f;
+          background: linear-gradient(180deg, #ffd36d, #edb343);
+        }
+
+        .buy-button:disabled {
+          opacity: 0.4;
+          cursor: not-allowed;
+        }
+
+        .selected-label {
+          min-height: 42px;
+          display: grid;
+          place-items: center;
+          color: #65dfa7;
+          font-size: 10px;
+          font-weight: 950;
+          letter-spacing: 0.7px;
+        }
+
+        .garage-footer {
+          max-width: 1350px;
+          margin: 35px auto 0;
+          padding-top: 18px;
+          border-top: 1px solid #24344a;
+          color: #637991;
+          font-size: 9px;
+          font-weight: 900;
+          letter-spacing: 1.3px;
+        }
+
+        @media (max-width: 600px) {
+          .garage-header {
+            align-items: flex-start;
+            flex-wrap: wrap;
+          }
+
+          .garage-hero {
+            padding-top: 30px;
+          }
+
+          .character-grid {
+            grid-template-columns: repeat(auto-fill, minmax(155px, 1fr));
+            gap: 10px;
+          }
+
+          .character-card {
+            padding: 15px 11px;
+          }
+
+          .character-avatar {
+            width: 62px;
+            height: 62px;
+            font-size: 19px;
+          }
+
+          .character-card h2 {
+            font-size: 16px;
+          }
+        }
+      `}</style>
     </main>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  page: {
-    minHeight: "100vh",
-    padding: "24px",
-    background: "#0b1120",
-    color: "#f8fafc",
-    fontFamily: "Arial, sans-serif",
-  },
-  header: {
-    maxWidth: "1100px",
-    margin: "0 auto",
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  logo: {
-    color: "#facc15",
-    fontSize: "25px",
-    fontWeight: 900,
-    letterSpacing: "2px",
-  },
-  secondaryButton: {
-    padding: "10px 16px",
-    color: "#f8fafc",
-    background: "#1e293b",
-    border: "1px solid #475569",
-    borderRadius: "9px",
-    cursor: "pointer",
-  },
-  intro: {
-    textAlign: "center",
-    margin: "45px 0 28px",
-  },
-  eyebrow: {
-    color: "#facc15",
-    fontSize: "12px",
-    fontWeight: 800,
-    letterSpacing: "3px",
-  },
-  title: {
-    margin: "10px 0",
-    fontSize: "42px",
-    fontWeight: 900,
-  },
-  subtitle: {
-    color: "#cbd5e1",
-  },
-  balance: {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: "10px",
-    marginTop: "15px",
-    padding: "12px 18px",
-    background: "#172338",
-    border: "1px solid #334155",
-    borderRadius: "12px",
-  },
-  coinIcon: {
-    display: "inline-flex",
-    width: "23px",
-    height: "23px",
-    justifyContent: "center",
-    alignItems: "center",
-    borderRadius: "50%",
-    background: "#facc15",
-    color: "#111827",
-    fontWeight: 900,
-  },
-  message: {
-    maxWidth: "500px",
-    margin: "0 auto 20px",
-    padding: "12px",
-    textAlign: "center",
-    color: "#fde68a",
-    background: "#172338",
-    borderRadius: "10px",
-    overflowWrap: "anywhere",
-  },
-  grid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
-    gap: "20px",
-    maxWidth: "1100px",
-    margin: "0 auto",
-  },
-  carCard: {
-    padding: "24px",
-    textAlign: "center",
-    background: "#111c30",
-    border: "1px solid #26364f",
-    borderRadius: "18px",
-  },
-  carImage: {
-    display: "flex",
-    justifyContent: "center",
-    alignItems: "center",
-    minHeight: "130px",
-    background: "#0b1120",
-    borderRadius: "12px",
-  },
-  carName: {
-    marginTop: "18px",
-    fontSize: "21px",
-    fontWeight: 800,
-  },
-  description: {
-    minHeight: "40px",
-    color: "#94a3b8",
-    fontSize: "13px",
-    lineHeight: 1.6,
-  },
-  price: {
-    margin: "18px 0",
-    color: "#facc15",
-    fontSize: "13px",
-    fontWeight: 900,
-    letterSpacing: "1px",
-  },
-  button: {
-    width: "100%",
-    padding: "13px 10px",
-    color: "#111827",
-    background: "#facc15",
-    border: "none",
-    borderRadius: "9px",
-    fontWeight: 900,
-    cursor: "pointer",
-  },
-  selectedButton: {
-    width: "100%",
-    padding: "13px 10px",
-    color: "#86efac",
-    background: "#14532d",
-    border: "1px solid #166534",
-    borderRadius: "9px",
-    fontWeight: 900,
-    cursor: "pointer",
-  },
-  footer: {
-    maxWidth: "700px",
-    margin: "35px auto 0",
-    color: "#94a3b8",
-    textAlign: "center",
-    fontSize: "13px",
-    lineHeight: 1.6,
-  },
-};

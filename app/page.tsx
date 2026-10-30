@@ -1,131 +1,28 @@
-
 "use client";
 
-import Navbar from "./components/Navbar";
 import { useEffect, useRef, useState } from "react";
+import type { KeyboardEvent } from "react";
+import Link from "next/link";
 import { createClient } from "../lib/supabase/client";
+import { PASSAGES, choosePassage } from "../lib/passages";
+import { CHARACTERS } from "../lib/characters";
 
 type RaceStatus = "ready" | "countdown" | "racing" | "finished";
 
-type CarOption = {
+type RaceBot = {
   id: string;
   name: string;
+  initials: string;
   color: string;
-  accent: string;
+  wpm: number;
+  finishSeconds: number;
 };
 
-const PASSAGE =
-  "Yahweh is my shepherd: I shall lack nothing. He makes me lie down in green pastures. He leads me beside still waters. He restores my soul. He guides me in the paths of righteousness for his name's sake.";
-
-const CARS: CarOption[] = [
-  {
-    id: "blue",
-    name: "Blue Racer",
-    color: "#39a9ff",
-    accent: "#d3efff",
-  },
-  {
-    id: "gold",
-    name: "Gold Cruiser",
-    color: "#f4bd4f",
-    accent: "#fff0ad",
-  },
-  {
-    id: "red",
-    name: "Red Comet",
-    color: "#ff5e6c",
-    accent: "#ffd9dc",
-  },
+const BOT_NAMES = [
+  { id: "psalm", name: "PSALM PILOT", initials: "PP", color: "#ad8cff" },
+  { id: "grace", name: "GRACE RACER", initials: "GR", color: "#51dba0" },
+  { id: "verse", name: "VERSE VELOCITY", initials: "VV", color: "#ff9256" },
 ];
-
-const BOT_RACERS = [
-  {
-    id: "psalm",
-    name: "PSALM PILOT",
-    initials: "PP",
-    color: "#ad8cff",
-    accent: "#e9deff",
-    finishSeconds: 29,
-  },
-  {
-    id: "grace",
-    name: "GRACE RACER",
-    initials: "GR",
-    color: "#51dba0",
-    accent: "#d2ffea",
-    finishSeconds: 38,
-  },
-  {
-    id: "verse",
-    name: "VERSE VELOCITY",
-    initials: "VV",
-    color: "#ff9256",
-    accent: "#ffe0cb",
-    finishSeconds: 49,
-  },
-];
-
-function CarGraphic({
-  color,
-  accent,
-}: {
-  color: string;
-  accent: string;
-}) {
-  return (
-    <svg
-      viewBox="0 0 128 64"
-      width="94"
-      height="48"
-      role="img"
-      aria-label="Race car"
-    >
-      <ellipse
-        cx="64"
-        cy="51"
-        rx="52"
-        ry="8"
-        fill="#020617"
-        opacity="0.5"
-      />
-      <circle cx="30" cy="44" r="11" fill="#080d15" />
-      <circle cx="30" cy="44" r="5" fill="#9ca9b8" />
-      <circle cx="94" cy="44" r="11" fill="#080d15" />
-      <circle cx="94" cy="44" r="5" fill="#9ca9b8" />
-
-      <path
-        d="M8 36 L13 27 Q16 23 28 22 L47 19 L59 9 L83 9 Q93 9 100 21 L112 25 Q120 27 121 35 L120 42 L8 42 Z"
-        fill={color}
-        stroke="#ffffff"
-        strokeOpacity="0.28"
-        strokeWidth="1.4"
-      />
-      <path
-        d="M51 19 L61 12 L81 12 Q88 12 94 21 Z"
-        fill="#172c43"
-      />
-      <path
-        d="M62 13 L62 19 L88 20 Q84 13 79 13 Z"
-        fill={accent}
-        opacity="0.7"
-      />
-      <path
-        d="M17 29 L44 25 L48 36 L13 36 Z"
-        fill={accent}
-        opacity="0.5"
-      />
-      <path
-        d="M51 27 L103 27 L110 31 L51 31 Z"
-        fill="#ffffff"
-        opacity="0.24"
-      />
-      <path d="M9 35 L19 35 L16 39 L9 39 Z" fill="#fff2c7" />
-      <path d="M111 32 L119 34 L119 38 L111 38 Z" fill="#ff354c" />
-      <path d="M13 22 L34 21 L30 25 L14 26 Z" fill={accent} />
-      <path d="M88 42 L105 42 L109 39 L110 42 Z" fill="#0b1220" />
-    </svg>
-  );
-}
 
 function formatTime(milliseconds: number) {
   const safeTime = Math.max(0, milliseconds);
@@ -137,71 +34,57 @@ function formatTime(milliseconds: number) {
   return `${minutes}:${seconds}.${tenths}`;
 }
 
+function getPlaceLabel(place: number) {
+  if (place === 1) return "1ST";
+  if (place === 2) return "2ND";
+  if (place === 3) return "3RD";
+  return `${place}TH`;
+}
+
 export default function HomePage() {
   const savedRaceRef = useRef(false);
+  const typingRef = useRef<HTMLTextAreaElement>(null);
+
   const [saveMessage, setSaveMessage] = useState("");
   const [status, setStatus] = useState<RaceStatus>("ready");
-  const [selectedCarId, setSelectedCarId] = useState("blue");
-  const [ownedCars, setOwnedCars] = useState<string[]>(["blue"]);
+
+  const [selectedCharacterId, setSelectedCharacterId] = useState("disciple");
+
   const [typed, setTyped] = useState("");
   const [correctKeystrokes, setCorrectKeystrokes] = useState(0);
   const [mistakes, setMistakes] = useState(0);
   const [feedback, setFeedback] = useState("");
+
   const [countdown, setCountdown] = useState(3);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [raceStartAt, setRaceStartAt] = useState<number | null>(null);
   const [finishTimeMs, setFinishTimeMs] = useState<number | null>(null);
 
-  const typingRef = useRef<HTMLTextAreaElement>(null);
-  
-  useEffect(() => {
-  async function loadSelectedCar() {
-    const supabase = createClient();
+  const [currentPassage, setCurrentPassage] = useState(PASSAGES[0]);
+  const [averageWpm, setAverageWpm] = useState(40);
+  const [recentWpms, setRecentWpms] = useState<number[]>([]);
+  const [usedPassageIds, setUsedPassageIds] = useState<string[]>([]);
+  const [raceSettingsLoaded, setRaceSettingsLoaded] = useState(false);
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+  const [raceBots, setRaceBots] = useState<RaceBot[]>([]);
 
-    if (!user) return;
+  const selectedCharacter =
+    CHARACTERS.find((character) => character.id === selectedCharacterId) ??
+    CHARACTERS[0];
 
-    const { data, error } = await supabase
-      .from("player_progress")
-      .select("selected_car")
-      .eq("user_id", user.id)
-      .maybeSingle();
+  const passage = currentPassage.text;
 
-    if (error) {
-      console.error("Could not load selected car:", error.message);
-      return;
-    }
+  const totalKeyAttempts = correctKeystrokes + mistakes;
 
-    if (data && CARS.some((car) => car.id === data.selected_car)) {
-      setSelectedCarId(data.selected_car);
-    }
-  }
+  const accuracy =
+    totalKeyAttempts === 0
+      ? 0
+      : Math.round((correctKeystrokes / totalKeyAttempts) * 100);
 
-  loadSelectedCar();
-}, []);
-
-  const selectedCar = CARS.find((car) => car.id === selectedCarId) ?? CARS[0];
-
-  let correctCount = 0;
-
-  for (let i = 0; i < typed.length; i++) {
-    if (typed[i] === PASSAGE[i]) correctCount++;
-  }
-
- const totalKeyAttempts = correctKeystrokes + mistakes;
-
-const accuracy =
-  totalKeyAttempts === 0
-    ? 0
-    : Math.round((correctKeystrokes / totalKeyAttempts) * 100);
-
-const progress = Math.min(
-  100,
-  Math.round((typed.length / PASSAGE.length) * 100)
-);
+  const progress =
+    passage.length === 0
+      ? 0
+      : Math.min(100, Math.round((typed.length / passage.length) * 100));
 
   const shownTime = finishTimeMs ?? elapsedMs;
 
@@ -210,21 +93,100 @@ const progress = Math.min(
       ? Math.round(typed.length / 5 / (shownTime / 60000))
       : 0;
 
-  const finishSeconds = finishTimeMs === null ? null : finishTimeMs / 1000;
+  const finishSeconds =
+    finishTimeMs === null ? null : finishTimeMs / 1000;
 
   const place =
     finishSeconds === null
       ? null
       : 1 +
-        BOT_RACERS.filter((racer) => racer.finishSeconds < finishSeconds)
-          .length;
+        raceBots.filter((bot) => bot.finishSeconds < finishSeconds).length;
+
+  useEffect(() => {
+    async function loadPlayerData() {
+      const supabase = createClient();
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        setRaceSettingsLoaded(true);
+        return;
+      }
+
+      const { data: playerData, error: playerError } = await supabase
+        .from("player_progress")
+        .select("selected_character")
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (playerError) {
+        console.error("Could not load player progress:", playerError.message);
+      } else if (playerData) {
+        if (
+          CHARACTERS.some(
+            (character) => character.id === playerData.selected_character
+          )
+        ) {
+          setSelectedCharacterId(playerData.selected_character);
+        }
+      }
+
+      const { data: settings, error: settingsError } = await supabase
+        .from("player_race_settings")
+        .select("average_wpm, recent_wpms, used_passage_ids")
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (settingsError) {
+        console.error("Could not load race settings:", settingsError.message);
+      } else if (settings) {
+        setAverageWpm(
+          typeof settings.average_wpm === "number" && settings.average_wpm > 0
+            ? settings.average_wpm
+            : 40
+        );
+
+        setRecentWpms(
+          Array.isArray(settings.recent_wpms) ? settings.recent_wpms : []
+        );
+
+        setUsedPassageIds(
+          Array.isArray(settings.used_passage_ids)
+            ? settings.used_passage_ids
+            : []
+        );
+      } else {
+        const { error: insertError } = await supabase
+          .from("player_race_settings")
+          .upsert({
+            user_id: user.id,
+            average_wpm: 40,
+            recent_wpms: [],
+            used_passage_ids: [],
+          });
+
+        if (insertError) {
+          console.error("Could not create race settings:", insertError.message);
+        }
+      }
+
+      setRaceSettingsLoaded(true);
+    }
+
+    loadPlayerData().catch((error) => {
+      console.error("Could not load player data:", error);
+      setRaceSettingsLoaded(true);
+    });
+  }, []);
 
   useEffect(() => {
     if (status !== "countdown") return;
 
     const timeout = window.setTimeout(() => {
       if (countdown > 1) {
-        setCountdown(countdown - 1);
+        setCountdown((current) => current - 1);
       } else {
         setRaceStartAt(Date.now());
         setStatus("racing");
@@ -249,57 +211,119 @@ const progress = Math.min(
       typingRef.current?.focus();
     }
   }, [status]);
-  
-useEffect(() => {
-  if (status !== "finished" || finishTimeMs === null) return;
-  if (savedRaceRef.current) return;
 
-  savedRaceRef.current = true;
+  useEffect(() => {
+    if (status !== "finished" || finishTimeMs === null) return;
+    if (savedRaceRef.current) return;
 
-  async function saveRace() {
-    const supabase = createClient();
+    const completedTimeMs = finishTimeMs;
+    savedRaceRef.current = true;
 
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
+    async function saveRace() {
+      const supabase = createClient();
 
-    if (userError || !user) {
-      setSaveMessage("Sign in to save your race stats.");
-      return;
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+
+      if (userError || !user) {
+        setSaveMessage("Sign in to save your race stats.");
+        return;
+      }
+
+      const finalWpm =
+        completedTimeMs > 0
+          ? Math.round(typed.length / 5 / (completedTimeMs / 60000))
+          : 0;
+
+      const { data: reward, error } = await supabase.rpc("complete_race", {
+        p_wpm: finalWpm,
+        p_accuracy: accuracy,
+        p_mistakes: mistakes,
+        p_duration_ms: completedTimeMs,
+      });
+
+      if (error) {
+        console.error("Could not save race:", error.message);
+        setSaveMessage(error.message);
+        savedRaceRef.current = false;
+        return;
+      }
+
+      const updatedRecentWpms = [...recentWpms, finalWpm].slice(-10);
+
+      const updatedAverageWpm = Math.max(
+        1,
+        Math.round(
+          updatedRecentWpms.reduce((total, speed) => total + speed, 0) /
+            updatedRecentWpms.length
+        )
+      );
+
+      const updatedUsedIds =
+        usedPassageIds.length >= PASSAGES.length
+          ? [currentPassage.id]
+          : Array.from(new Set([...usedPassageIds, currentPassage.id]));
+
+      const { error: settingsError } = await supabase
+        .from("player_race_settings")
+        .upsert({
+          user_id: user.id,
+          average_wpm: updatedAverageWpm,
+          recent_wpms: updatedRecentWpms,
+          used_passage_ids: updatedUsedIds,
+        });
+
+      setRecentWpms(updatedRecentWpms);
+      setAverageWpm(updatedAverageWpm);
+      setUsedPassageIds(updatedUsedIds);
+
+      const rewardMessage =
+        `+${reward.coins_earned} coins, ` +
+        `+${reward.xp_earned} XP, and ` +
+        `+${reward.points_earned ?? 0} race points.`;
+
+      if (settingsError) {
+        console.error("Could not update race settings:", settingsError.message);
+        setSaveMessage(
+          `Race saved! ${rewardMessage} Passage settings could not be updated.`
+        );
+        return;
+      }
+
+      setSaveMessage(`Race saved! ${rewardMessage}`);
     }
 
-    const finalWpm =
-finishTimeMs !== null && finishTimeMs > 0
-        ? Math.round(typed.length / 5 / (finishTimeMs / 60000))
-        : 0;
-
-   
-const { data: reward, error } = await supabase.rpc("complete_race", {
-  p_wpm: finalWpm,
-  p_accuracy: accuracy,
-  p_mistakes: mistakes,
-  p_duration_ms: finishTimeMs,
-});
-
-if (error) {
-  console.error("Could not save race:", error.message);
-  setSaveMessage(error.message);
-  savedRaceRef.current = false;
-  return;
-}
-
-setSaveMessage(
-  `Race saved! +${reward.coins_earned} coins and +${reward.xp_earned} XP.`
-);
-
-  }
-
-  saveRace();
-}, [status, finishTimeMs, typed.length, accuracy, mistakes]);
-
+    saveRace();
+  }, [
+    status,
+    finishTimeMs,
+    typed.length,
+    accuracy,
+    mistakes,
+    recentWpms,
+    usedPassageIds,
+    currentPassage,
+  ]);
 
   function startRace() {
+    const nextPassage = choosePassage(averageWpm, usedPassageIds);
+    const wordCount = nextPassage.text.trim().split(/\s+/).length;
+
+    const randomizedBots = BOT_NAMES.map((bot) => {
+      const botWpm = Math.floor(Math.random() * 56) + 30;
+
+      return {
+        ...bot,
+        wpm: botWpm,
+        finishSeconds: (wordCount / botWpm) * 60,
+      };
+    });
+
+    setCurrentPassage(nextPassage);
+    setRaceBots(randomizedBots);
+
     savedRaceRef.current = false;
     setSaveMessage("");
     setTyped("");
@@ -313,75 +337,7 @@ setSaveMessage(
     setStatus("countdown");
   }
 
-
-function handleTypingKey(event: React.KeyboardEvent<HTMLTextAreaElement>) {
-  if (status !== "racing") {
-    event.preventDefault();
-    return;
-  }
-
-  // Let the browser handle keyboard shortcuts without counting them.
-  if (event.ctrlKey || event.metaKey || event.altKey) {
-    return;
-  }
-
-  // Backspace moves back one character so you can retry it.
-  if (event.key === "Backspace") {
-    event.preventDefault();
-    setTyped((current) => current.slice(0, -1));
-    setFeedback("");
-    return;
-  }
-
-  // Ignore non-character keys, such as arrows and Shift.
-  if (event.key.length !== 1) {
-    event.preventDefault();
-    return;
-  }
-
-  // Prevent the browser from inserting the key automatically.
-  event.preventDefault();
-
-  const expected = PASSAGE[typed.length];
-
-  if (expected === undefined) return;
-
-  // A wrong key counts as a mistake but does NOT advance.
-  if (event.key !== expected) {
-    setMistakes((current) => current + 1);
-
-    const expectedLabel =
-      expected === " " ? "SPACE" : `“${expected}”`;
-
-    const pressedLabel =
-      event.key === " " ? "SPACE" : `“${event.key}”`;
-
-    setFeedback(
-      `Wrong key! You pressed ${pressedLabel}. Press ${expectedLabel} to advance.`
-    );
-
-    return;
-  }
-
-  // Only the exact correct key advances your position.
-  const nextText = typed + event.key;
-
-  setTyped(nextText);
-  setCorrectKeystrokes((current) => current + 1);
-  setFeedback("");
-
-  // Finish the race only when the entire passage is correct.
-  if (nextText === PASSAGE && raceStartAt !== null) {
-    const finalTime = Date.now() - raceStartAt;
-
-    setElapsedMs(finalTime);
-    setFinishTimeMs(finalTime);
-    setStatus("finished");
-  }
-}
-
-
-  function changeCar() {
+  function resetRace() {
     setTyped("");
     setCorrectKeystrokes(0);
     setMistakes(0);
@@ -391,60 +347,130 @@ function handleTypingKey(event: React.KeyboardEvent<HTMLTextAreaElement>) {
     setRaceStartAt(null);
     setCountdown(3);
     setStatus("ready");
+    setSaveMessage("");
   }
 
-  const playerProgress = status === "finished" ? 100 : progress;
+  function handleTypingKey(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (status !== "racing") {
+      event.preventDefault();
+      return;
+    }
+
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+
+    if (event.key === "Backspace") {
+      event.preventDefault();
+      setTyped((current) => current.slice(0, -1));
+      setFeedback("");
+      return;
+    }
+
+    if (event.key.length !== 1) {
+      event.preventDefault();
+      return;
+    }
+
+    event.preventDefault();
+
+    const expected = passage[typed.length];
+
+    if (expected === undefined) return;
+
+    if (event.key !== expected) {
+      setMistakes((current) => current + 1);
+
+      const expectedLabel = expected === " " ? "SPACE" : `“${expected}”`;
+      const pressedLabel = event.key === " " ? "SPACE" : `“${event.key}”`;
+
+      setFeedback(
+        `Wrong key! You pressed ${pressedLabel}. Press ${expectedLabel} to advance.`
+      );
+
+      return;
+    }
+
+    const nextText = typed + event.key;
+
+    setTyped(nextText);
+    setCorrectKeystrokes((current) => current + 1);
+    setFeedback("");
+
+    if (nextText === passage && raceStartAt !== null) {
+      const finalTime = Date.now() - raceStartAt;
+
+      setElapsedMs(finalTime);
+      setFinishTimeMs(finalTime);
+      setStatus("finished");
+    }
+  }
 
   const racers = [
     {
       id: "you",
-      name: "YOU",
-      initials: "YOU",
-      color: selectedCar.color,
-      accent: selectedCar.accent,
-      progress: playerProgress,
+      name: selectedCharacter.name,
+      initials: selectedCharacter.initials,
+      color: selectedCharacter.color,
+      progress: status === "finished" ? 100 : progress,
       isPlayer: true,
     },
-    ...BOT_RACERS.map((racer) => ({
-      ...racer,
-      progress: Math.min(
-        100,
-        Math.round(((shownTime / 1000) / racer.finishSeconds) * 100)
-      ),
+    ...raceBots.map((bot) => ({
+      id: bot.id,
+      name: bot.name,
+      initials: bot.initials,
+      color: bot.color,
+      progress:
+        status === "ready"
+          ? 0
+          : Math.min(
+              100,
+              Math.round(((shownTime / 1000) / bot.finishSeconds) * 100)
+            ),
       isPlayer: false,
     })),
   ];
- <Navbar />
+
   return (
     <main className="bt-page">
       <header className="topbar">
-        <a className="brand" href="/" aria-label="Bible Type home">
+        <Link className="brand" href="/">
           <span className="brand-icon">B</span>
           <span>
             <span className="brand-name">BIBLE TYPE</span>
             <span className="brand-subtitle">SCRIPTURE RACING</span>
           </span>
-        </a>
+        </Link>
 
         <div className="topbar-right">
           <span className="mode-pill">
             <span className="online-dot" />
             SOLO RACE
           </span>
-          <a className="profile-link" href="/dashboard">
-            PLAYER PROFILE ↗
-          </a>
+
+          <Link className="profile-link" href="/garage">
+            GARAGE & SHOP ↗
+          </Link>
+
+          <Link className="profile-link" href="/leaderboard">
+            LEADERBOARD ↗
+          </Link>
+
+          <Link className="profile-link" href="/dashboard">
+            PROFILE ↗
+          </Link>
         </div>
       </header>
 
       <section className="hero">
         <div>
           <div className="eyebrow">READY · SET · TYPE</div>
-          <h1>Faith meets the <span>fast lane.</span></h1>
+          <h1>
+            Faith meets the <span>fast lane.</span>
+          </h1>
           <p>
             Race through Scripture. Find your rhythm. Make every word count.
           </p>
         </div>
+
         <div className="hero-mark" aria-hidden="true">
           <div className="hero-mark-line" />
           <div className="hero-mark-line short" />
@@ -459,6 +485,7 @@ function handleTypingKey(event: React.KeyboardEvent<HTMLTextAreaElement>) {
               <div className="section-kicker">THE CIRCUIT</div>
               <h2>Race Arena</h2>
             </div>
+
             <span className={`race-status status-${status}`}>
               <span className="status-dot" />
               {status === "ready"
@@ -493,27 +520,30 @@ function handleTypingKey(event: React.KeyboardEvent<HTMLTextAreaElement>) {
                     >
                       {racer.initials}
                     </span>
+
                     <span className="runner-name">
-                      {racer.isPlayer ? selectedCar.name : racer.name}
+                      {racer.isPlayer ? "YOU" : racer.name}
                     </span>
                   </div>
 
                   <div className={`track-lane lane-${index}`}>
                     <div className="start-line" />
                     <div className="finish-line" />
+
                     <div
-                      className="lane-car"
+                      className="lane-character"
                       style={{
                         left: `calc(${racer.progress}% - ${
-                          racer.progress * 0.94
+                          racer.progress * 0.7
                         }px)`,
+                        borderColor: racer.color,
+                        color: racer.color,
+                        background: `${racer.color}20`,
                       }}
                     >
-                      <CarGraphic
-                        color={racer.color}
-                        accent={racer.accent}
-                      />
+                      {racer.initials}
                     </div>
+
                     <span className="lane-number">
                       {String(index + 1).padStart(2, "0")}
                     </span>
@@ -532,7 +562,7 @@ function handleTypingKey(event: React.KeyboardEvent<HTMLTextAreaElement>) {
 
           <div className="track-footer">
             <span>
-              <span className="legend-dot player-dot" /> YOUR CAR
+              <span className="legend-dot player-dot" /> YOUR CHARACTER
             </span>
             <span>
               <span className="legend-dot bot-dot" /> COMPUTER RACERS
@@ -542,180 +572,126 @@ function handleTypingKey(event: React.KeyboardEvent<HTMLTextAreaElement>) {
 
           {status === "finished" && place !== null && (
             <div className="result-card">
-              <div className="result-badge">{place === 1 ? "1ST" : `${place}TH`}</div>
+              <div className="result-badge">{getPlaceLabel(place)}</div>
+
               <div className="result-copy">
                 <div className="section-kicker">
                   {place === 1 ? "VICTORY" : "RACE COMPLETE"}
                 </div>
+
                 <h3>
                   {place === 1
                     ? "You crossed the finish line first!"
                     : "Great job finishing the race!"}
                 </h3>
+
                 <p>
-                  You finished in {formatTime(finishTimeMs ?? 0)} with{" "}
-                  {wpm} WPM and {accuracy}% accuracy.
+                  You finished in {formatTime(finishTimeMs ?? 0)} with {wpm}{" "}
+                  WPM and {accuracy}% accuracy.
                 </p>
-                <p role="status">{saveMessage || "Saving your race..."}</p>
+
+                <p role="status">
+                  {saveMessage || "Saving your race..."}
+                </p>
               </div>
+
               <div className="result-actions">
                 <button className="primary-button" onClick={startRace}>
                   RACE AGAIN ↗
                 </button>
-                <button className="secondary-button" onClick={changeCar}>
-                  CHANGE CAR
+                <button className="secondary-button" onClick={resetRace}>
+                  BACK TO READY
                 </button>
               </div>
             </div>
           )}
         </section>
 
-        <aside className="sidebar">
-          <section className="panel garage-panel">
-            <div className="section-kicker">YOUR GARAGE</div>
-            <h2>Choose your ride</h2>
-            <p className="panel-description">
-              Pick a car before the starting lights.
-            </p>
+        <section className="panel stats-panel">
+          <div className="section-kicker">LIVE TELEMETRY</div>
+          <h2>Your race stats</h2>
 
-           
-<div className="car-options">
-  {CARS.map((car) => {
-    const isOwned = ownedCars.includes(car.id);
-    const isSelected = selectedCarId === car.id;
-
-    return (
-      <button
-        key={car.id}
-        className={`car-option ${isSelected ? "selected" : ""}`}
-        onClick={async () => {
-          if (!isOwned) return;
-
-          const supabase = createClient();
-
-          const { error } = await supabase.rpc("select_car", {
-            p_car_id: car.id,
-          });
-
-          if (error) {
-            console.error("Could not select car:", error.message);
-            setSaveMessage("Could not select this car. Please try again.");
-            return;
-          }
-
-          setSelectedCarId(car.id);
-          setSaveMessage("");
-        }}
-        disabled={
-          !isOwned ||
-          status === "countdown" ||
-          status === "racing"
-        }
-        aria-pressed={isSelected}
-      >
-        <span
-          className="car-swatch"
-          style={{ background: car.color }}
-        />
-
-        <span className="car-option-name">
-          {car.name}
-          {!isOwned && " — LOCKED"}
-        </span>
-
-        <span className="car-option-check">
-          {isSelected ? "✓" : !isOwned ? "🔒" : ""}
-        </span>
-      </button>
-    );
-  })}
-</div>
-
-
-            <div className="selected-car-preview">
-              <CarGraphic
-                color={selectedCar.color}
-                accent={selectedCar.accent}
-              />
-              <div>
-                <span className="preview-label">SELECTED VEHICLE</span>
-                <strong>{selectedCar.name}</strong>
-              </div>
+          <div className="stats-grid">
+            <div className="stat-card">
+              <span className="stat-label">SPEED</span>
+              <strong>{status === "ready" ? "—" : wpm}</strong>
+              <span className="stat-unit">WPM</span>
             </div>
 
-            <button
-              className="primary-button start-button"
-              onClick={startRace}
-              disabled={status === "countdown" || status === "racing"}
+            <div className="stat-card">
+              <span className="stat-label">ACCURACY</span>
+              <strong>
+                {totalKeyAttempts === 0 ? "—" : `${accuracy}%`}
+              </strong>
+              <span className="stat-unit">CORRECT</span>
+            </div>
+
+            <div className="stat-card">
+              <span className="stat-label">TIME</span>
+              <strong className="time-value">{formatTime(shownTime)}</strong>
+              <span className="stat-unit">ELAPSED</span>
+            </div>
+
+            <div className="stat-card">
+              <span className="stat-label">PROGRESS</span>
+              <strong>{progress}%</strong>
+              <span className="stat-unit">PASSAGE</span>
+            </div>
+          </div>
+
+          <div className="progress-heading">
+            <span>RACE PROGRESS</span>
+            <span>{progress}%</span>
+          </div>
+
+          <div
+            className="progress-track"
+            role="progressbar"
+            aria-label="Passage typing progress"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={progress}
+          >
+            <div className="progress-fill" style={{ width: `${progress}%` }} />
+          </div>
+
+          <div className="selected-racer">
+            <span
+              className="runner-initials"
+              style={{
+                color: selectedCharacter.color,
+                borderColor: selectedCharacter.color,
+              }}
             >
-              {status === "ready"
-                ? "START RACE  →"
+              {selectedCharacter.initials}
+            </span>
+            <div>
+              <span className="preview-label">YOUR RACER</span>
+              <strong>{selectedCharacter.name}</strong>
+            </div>
+            <Link href="/garage">CHANGE ↗</Link>
+          </div>
+
+          <button
+            className="primary-button start-button"
+            onClick={startRace}
+            disabled={
+              !raceSettingsLoaded ||
+              status === "countdown" ||
+              status === "racing"
+            }
+          >
+            {!raceSettingsLoaded
+              ? "LOADING PLAYER..."
+              : status === "ready"
+                ? "START RACE →"
                 : status === "countdown"
                   ? "GET READY..."
                   : status === "racing"
                     ? "RACE IN PROGRESS"
-                    : "RACE COMPLETE"}
-            </button>
-
-            <p className="garage-note">
-              {status === "ready"
-                ? "Hit the button when you are ready."
-                : status === "countdown"
-                  ? "Take a breath. The race is about to begin."
-                  : status === "racing"
-                    ? "Type the passage exactly as shown below."
-                    : "Your results are ready. Race again whenever you like."}
-            </p>
-          </section>
-
-          <section className="panel stats-panel">
-            <div className="section-kicker">LIVE TELEMETRY</div>
-            <h2>Your race stats</h2>
-
-            <div className="stats-grid">
-              <div className="stat-card">
-                <span className="stat-label">SPEED</span>
-                <strong>{status === "ready" ? "—" : wpm}</strong>
-                <span className="stat-unit">WPM</span>
-              </div>
-              <div className="stat-card">
-                <span className="stat-label">ACCURACY</span>
-                <strong>
-                  {totalKeyAttempts === 0 ? "—" : `${accuracy}%`}
-                </strong>
-                <span className="stat-unit">CORRECT</span>
-              </div>
-              <div className="stat-card">
-                <span className="stat-label">TIME</span>
-                <strong className="time-value">{formatTime(shownTime)}</strong>
-                <span className="stat-unit">ELAPSED</span>
-              </div>
-              <div className="stat-card">
-                <span className="stat-label">PROGRESS</span>
-                <strong>{progress}%</strong>
-                <span className="stat-unit">PASSAGE</span>
-              </div>
-            </div>
-
-            <div className="progress-heading">
-              <span>RACE PROGRESS</span>
-              <span>{progress}%</span>
-            </div>
-            <div
-              className="progress-track"
-              role="progressbar"
-              aria-label="Passage typing progress"
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={progress}
-            >
-              <div
-                className="progress-fill"
-                style={{ width: `${progress}%` }}
-              />
-            </div>
-          </section>
-        </aside>
+                    : "RACE AGAIN →"}
+          </button>
+        </section>
 
         <section className="panel typing-panel">
           <div className="typing-heading">
@@ -723,13 +699,17 @@ function handleTypingKey(event: React.KeyboardEvent<HTMLTextAreaElement>) {
               <div className="section-kicker">THE WORD IS YOUR TRACK</div>
               <h2>Type the passage</h2>
             </div>
-            <span className="translation-pill">WORLD ENGLISH BIBLE · WEB</span>
+
+            <span className="translation-pill">
+              WORLD ENGLISH BIBLE · WEB
+            </span>
           </div>
 
           <div className="verse-box">
-            <div className="verse-reference">PSALM 23:1–3</div>
-            <p className="verse-text" aria-label={PASSAGE}>
-              {PASSAGE.split("").map((character, index) => {
+            <div className="verse-reference">{currentPassage.reference}</div>
+
+            <p className="verse-text" aria-label={passage}>
+              {passage.split("").map((character, index) => {
                 const characterWasTyped = index < typed.length;
                 const isCorrect =
                   characterWasTyped && typed[index] === character;
@@ -739,13 +719,14 @@ function handleTypingKey(event: React.KeyboardEvent<HTMLTextAreaElement>) {
                   index === typed.length && status === "racing";
 
                 let className = "verse-character";
+
                 if (isCorrect) className += " character-correct";
                 if (isIncorrect) className += " character-incorrect";
                 if (isCurrent) className += " character-current";
 
                 return (
                   <span className={className} key={index}>
-                    {character === " " ? "\u00A0" : character}
+                    {character}
                   </span>
                 );
               })}
@@ -769,7 +750,7 @@ function handleTypingKey(event: React.KeyboardEvent<HTMLTextAreaElement>) {
             value={typed}
             onKeyDown={handleTypingKey}
             readOnly
-            maxLength={PASSAGE.length}
+            maxLength={passage.length}
             rows={3}
             disabled={status !== "racing"}
             placeholder={
@@ -788,37 +769,40 @@ function handleTypingKey(event: React.KeyboardEvent<HTMLTextAreaElement>) {
           />
 
           <div className="typing-bottom">
-            {feedback && (
-  <p className="typing-feedback" role="status">
-    {feedback}
-  </p>
-)}
-            <p id="typing-help">
-              {status === "racing"
-                ? "Type the passage exactly as shown. Use Backspace to correct mistakes."
-                : status === "finished"
-                  ? "Well raced! Check your results above."
-                  : "Your typing area will unlock when the race begins."}
-            </p>
+            <div>
+              {feedback && (
+                <p className="typing-feedback" role="status">
+                  {feedback}
+                </p>
+              )}
+
+              <p id="typing-help">
+                {status === "racing"
+                  ? "Type the passage exactly as shown. Use Backspace to correct mistakes."
+                  : status === "finished"
+                    ? "Well raced! Check your results above."
+                    : "Your typing area will unlock when the race begins."}
+              </p>
+            </div>
+
             <span className="character-count">
-              {typed.length} / {PASSAGE.length} CHARACTERS
+              {typed.length} / {passage.length} CHARACTERS
             </span>
           </div>
         </section>
       </div>
 
       <footer className="page-footer">
-        <span>BIBLE TYPE <span className="footer-dot">•</span> LEARN · TYPE · RACE</span>
-        <span>PASSAGE: PSALM 23:1–3 · WORLD ENGLISH BIBLE (PUBLIC DOMAIN)</span>
+        <span>
+          BIBLE TYPE <span className="footer-dot">•</span> LEARN · TYPE · RACE
+        </span>
+        <span>
+          PASSAGE: {currentPassage.reference} · WORLD ENGLISH BIBLE (PUBLIC
+          DOMAIN)
+        </span>
       </footer>
 
       <style jsx global>{`
-      .typing-feedback {
-  margin: 10px 0 0;
-  color: #ff8292;
-  font-size: 11px;
-  font-weight: 800;
-}
         * {
           box-sizing: border-box;
         }
@@ -878,10 +862,8 @@ function handleTypingKey(event: React.KeyboardEvent<HTMLTextAreaElement>) {
           background: #f4bd4f;
           color: #111827;
           font-size: 25px;
-          line-height: 1;
           font-weight: 1000;
           font-style: italic;
-          box-shadow: 0 5px 25px rgba(244, 189, 79, 0.13);
         }
 
         .brand-name,
@@ -906,7 +888,9 @@ function handleTypingKey(event: React.KeyboardEvent<HTMLTextAreaElement>) {
         .topbar-right {
           display: flex;
           align-items: center;
-          gap: 14px;
+          justify-content: flex-end;
+          flex-wrap: wrap;
+          gap: 9px;
         }
 
         .mode-pill,
@@ -937,14 +921,12 @@ function handleTypingKey(event: React.KeyboardEvent<HTMLTextAreaElement>) {
           display: inline-block;
           border-radius: 50%;
           background: #52dda0;
-          box-shadow: 0 0 10px rgba(82, 221, 160, 0.35);
         }
 
         .profile-link {
           color: #f4bd4f;
           text-decoration: none;
           background: rgba(244, 189, 79, 0.06);
-          transition: background 0.15s ease;
         }
 
         .profile-link:hover {
@@ -954,8 +936,8 @@ function handleTypingKey(event: React.KeyboardEvent<HTMLTextAreaElement>) {
         .hero {
           max-width: 1380px;
           margin: 0 auto;
-          min-height: 175px;
-          padding: 33px 0 27px;
+          min-height: 155px;
+          padding: 30px 0;
           display: flex;
           justify-content: space-between;
           align-items: center;
@@ -999,7 +981,6 @@ function handleTypingKey(event: React.KeyboardEvent<HTMLTextAreaElement>) {
           gap: 9px;
           border-left: 1px solid #29374b;
           padding-left: 25px;
-          opacity: 0.85;
         }
 
         .hero-mark-line {
@@ -1027,7 +1008,7 @@ function handleTypingKey(event: React.KeyboardEvent<HTMLTextAreaElement>) {
           max-width: 1380px;
           margin: 0 auto;
           display: grid;
-          grid-template-columns: minmax(0, 1fr) 315px;
+          grid-template-columns: minmax(0, 1fr) 300px;
           gap: 18px;
           align-items: start;
         }
@@ -1040,7 +1021,8 @@ function handleTypingKey(event: React.KeyboardEvent<HTMLTextAreaElement>) {
           box-shadow: 0 13px 34px rgba(0, 0, 0, 0.12);
         }
 
-        .race-panel {
+        .race-panel,
+        .typing-panel {
           padding: 22px;
         }
 
@@ -1053,7 +1035,6 @@ function handleTypingKey(event: React.KeyboardEvent<HTMLTextAreaElement>) {
         }
 
         .panel-heading h2,
-        .garage-panel h2,
         .stats-panel h2,
         .typing-heading h2 {
           margin: 7px 0 0;
@@ -1087,7 +1068,7 @@ function handleTypingKey(event: React.KeyboardEvent<HTMLTextAreaElement>) {
 
         .track-heading {
           display: grid;
-          grid-template-columns: 105px 1fr;
+          grid-template-columns: 115px 1fr;
           gap: 10px;
           margin-top: 26px;
           margin-bottom: 8px;
@@ -1119,7 +1100,7 @@ function handleTypingKey(event: React.KeyboardEvent<HTMLTextAreaElement>) {
           min-width: 0;
           min-height: 74px;
           display: grid;
-          grid-template-columns: 105px minmax(0, 1fr);
+          grid-template-columns: 115px minmax(0, 1fr);
           gap: 10px;
           align-items: center;
           padding: 5px 10px;
@@ -1157,8 +1138,6 @@ function handleTypingKey(event: React.KeyboardEvent<HTMLTextAreaElement>) {
           font-size: 9px;
           font-weight: 850;
           line-height: 1.3;
-          letter-spacing: 0.3px;
-          overflow-wrap: anywhere;
         }
 
         .track-lane {
@@ -1169,11 +1148,7 @@ function handleTypingKey(event: React.KeyboardEvent<HTMLTextAreaElement>) {
           border: 1px solid rgba(135, 158, 184, 0.12);
           border-radius: 5px;
           background:
-            repeating-linear-gradient(
-              90deg,
-              transparent 0 32px,
-              rgba(255, 255, 255, 0.025) 32px 33px
-            ),
+            repeating-linear-gradient(90deg, transparent 0 32px, rgba(255,255,255,.025) 32px 33px),
             linear-gradient(180deg, #202d3b 0%, #182433 100%);
         }
 
@@ -1204,32 +1179,24 @@ function handleTypingKey(event: React.KeyboardEvent<HTMLTextAreaElement>) {
           bottom: 0;
           width: 12px;
           background-color: #e8edf4;
-          background-image: repeating-conic-gradient(
-            #172334 0% 25%,
-            #e8edf4 0% 50%
-          );
+          background-image: repeating-conic-gradient(#172334 0% 25%, #e8edf4 0% 50%);
           background-size: 12px 12px;
         }
 
-        .lane-car {
+        .lane-character {
           position: absolute;
           z-index: 2;
           top: 50%;
-          width: 94px;
-          height: 48px;
-          display: flex;
-          align-items: center;
+          width: 38px;
+          height: 38px;
+          display: grid;
+          place-items: center;
+          border: 2px solid;
+          border-radius: 50%;
+          font-size: 10px;
+          font-weight: 950;
           transform: translateY(-50%);
           transition: left 0.12s linear;
-        }
-
-        .lane-car svg {
-        transform: scaleX(-1);
-          display: block;
-          width: 94px;
-          max-width: none;
-          height: 48px;
-          filter: drop-shadow(0 3px 3px rgba(0, 0, 0, 0.3));
         }
 
         .lane-number {
@@ -1260,7 +1227,6 @@ function handleTypingKey(event: React.KeyboardEvent<HTMLTextAreaElement>) {
           font-size: clamp(54px, 8vw, 86px);
           font-weight: 1000;
           line-height: 1;
-          text-shadow: 0 0 35px rgba(244, 189, 79, 0.2);
         }
 
         .countdown-label {
@@ -1308,165 +1274,8 @@ function handleTypingKey(event: React.KeyboardEvent<HTMLTextAreaElement>) {
           margin-left: auto;
         }
 
-        .sidebar {
-          display: flex;
-          flex-direction: column;
-          gap: 18px;
-        }
-
-        .garage-panel,
         .stats-panel {
           padding: 20px;
-        }
-
-        .panel-description {
-          margin: 8px 0 17px;
-          color: #8fa3b9;
-          font-size: 12px;
-          line-height: 1.5;
-        }
-
-        .car-options {
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-        }
-
-        .car-option {
-          width: 100%;
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          padding: 10px;
-          color: #b6c6d8;
-          text-align: left;
-          border: 1px solid #293a50;
-          border-radius: 8px;
-          background: #0d1827;
-          cursor: pointer;
-          transition:
-            border-color 0.15s ease,
-            background 0.15s ease;
-        }
-
-        .car-option:hover:not(:disabled) {
-          border-color: #536780;
-        }
-
-        .car-option.selected {
-          color: #f1f6fc;
-          border-color: #d9a83f;
-          background: rgba(244, 189, 79, 0.075);
-        }
-
-        .car-option:disabled {
-          cursor: not-allowed;
-          opacity: 0.8;
-        }
-
-        .car-swatch {
-          width: 9px;
-          height: 24px;
-          display: block;
-          border-radius: 3px;
-          box-shadow: 0 0 10px rgba(255, 255, 255, 0.06);
-        }
-
-        .car-option-name {
-          flex: 1;
-          font-size: 12px;
-          font-weight: 800;
-        }
-
-        .car-option-check {
-          color: #f4bd4f;
-          font-weight: 950;
-        }
-
-        .selected-car-preview {
-          min-height: 75px;
-          display: flex;
-          align-items: center;
-          gap: 14px;
-          margin: 15px 0;
-          padding: 8px;
-          border: 1px dashed #2b3b50;
-          border-radius: 8px;
-          background: rgba(6, 15, 28, 0.4);
-        }
-
-        .selected-car-preview svg {
-        transform: scaleX(-1);
-          flex: 0 0 94px;
-        }
-
-        .preview-label {
-          display: block;
-          margin-bottom: 6px;
-          color: #748ba5;
-          font-size: 8px;
-          font-weight: 900;
-          letter-spacing: 1px;
-        }
-
-        .selected-car-preview strong {
-          display: block;
-          color: #f0f5fc;
-          font-size: 12px;
-        }
-
-        .primary-button,
-        .secondary-button {
-          min-height: 43px;
-          border-radius: 7px;
-          padding: 12px 14px;
-          font-size: 10px;
-          font-weight: 950;
-          letter-spacing: 1px;
-          cursor: pointer;
-          transition:
-            transform 0.15s ease,
-            background 0.15s ease;
-        }
-
-        .primary-button {
-          color: #171a20;
-          border: 1px solid #f4bd4f;
-          background: linear-gradient(180deg, #ffd36d, #edb343);
-          box-shadow: 0 6px 18px rgba(244, 189, 79, 0.1);
-        }
-
-        .primary-button:hover:not(:disabled) {
-          transform: translateY(-1px);
-          background: linear-gradient(180deg, #ffdc86, #f4bd4f);
-        }
-
-        .primary-button:disabled {
-          cursor: not-allowed;
-          opacity: 0.6;
-        }
-
-        .secondary-button {
-          color: #c3d2e2;
-          border: 1px solid #34465c;
-          background: #132136;
-        }
-
-        .secondary-button:hover {
-          background: #1c2d43;
-        }
-
-        .start-button {
-          width: 100%;
-          min-height: 48px;
-        }
-
-        .garage-note {
-          margin: 10px 0 0;
-          color: #8095ac;
-          font-size: 10px;
-          line-height: 1.5;
-          text-align: center;
         }
 
         .stats-panel h2 {
@@ -1504,12 +1313,10 @@ function handleTypingKey(event: React.KeyboardEvent<HTMLTextAreaElement>) {
           color: #f0f5fb;
           font-size: 25px;
           font-weight: 950;
-          letter-spacing: -0.8px;
         }
 
         .stat-card .time-value {
           font-size: 20px;
-          letter-spacing: -0.5px;
         }
 
         .stat-unit {
@@ -1545,9 +1352,84 @@ function handleTypingKey(event: React.KeyboardEvent<HTMLTextAreaElement>) {
           transition: width 0.12s ease;
         }
 
+        .selected-racer {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          margin-top: 17px;
+          padding: 12px;
+          border: 1px dashed #2b3b50;
+          border-radius: 8px;
+          background: rgba(6, 15, 28, 0.4);
+        }
+
+        .selected-racer > div {
+          flex: 1;
+          min-width: 0;
+        }
+
+        .selected-racer strong {
+          display: block;
+          color: #f0f5fc;
+          font-size: 12px;
+        }
+
+        .selected-racer a {
+          color: #f4bd4f;
+          font-size: 9px;
+          font-weight: 900;
+          text-decoration: none;
+        }
+
+        .preview-label {
+          display: block;
+          margin-bottom: 5px;
+          color: #748ba5;
+          font-size: 8px;
+          font-weight: 900;
+          letter-spacing: 1px;
+        }
+
+        .primary-button,
+        .secondary-button {
+          min-height: 43px;
+          border-radius: 7px;
+          padding: 12px 14px;
+          font-size: 10px;
+          font-weight: 950;
+          letter-spacing: 1px;
+          cursor: pointer;
+        }
+
+        .primary-button {
+          color: #171a20;
+          border: 1px solid #f4bd4f;
+          background: linear-gradient(180deg, #ffd36d, #edb343);
+        }
+
+        .primary-button:hover:not(:disabled) {
+          background: linear-gradient(180deg, #ffdc86, #f4bd4f);
+        }
+
+        .primary-button:disabled {
+          cursor: not-allowed;
+          opacity: 0.6;
+        }
+
+        .secondary-button {
+          color: #c3d2e2;
+          border: 1px solid #34465c;
+          background: #132136;
+        }
+
+        .start-button {
+          width: 100%;
+          min-height: 48px;
+          margin-top: 14px;
+        }
+
         .typing-panel {
           grid-column: 1 / -1;
-          padding: 22px;
         }
 
         .translation-pill {
@@ -1564,13 +1446,13 @@ function handleTypingKey(event: React.KeyboardEvent<HTMLTextAreaElement>) {
         }
 
         .verse-box {
+          width: 100%;
+          min-width: 0;
           margin-top: 20px;
           padding: 20px;
           border: 1px solid #2a3e56;
           border-radius: 9px;
-          background:
-            linear-gradient(135deg, rgba(25, 60, 91, 0.23), transparent 70%),
-            #0b1727;
+          background: linear-gradient(135deg, rgba(25, 60, 91, 0.23), transparent 70%), #0b1727;
         }
 
         .verse-reference {
@@ -1582,6 +1464,9 @@ function handleTypingKey(event: React.KeyboardEvent<HTMLTextAreaElement>) {
         }
 
         .verse-text {
+          display: block;
+          width: 100%;
+          max-width: 100%;
           margin: 0;
           color: #a4b6ca;
           font-family: "Courier New", monospace;
@@ -1589,15 +1474,14 @@ function handleTypingKey(event: React.KeyboardEvent<HTMLTextAreaElement>) {
           font-weight: 700;
           line-height: 1.95;
           letter-spacing: 0.2px;
-          overflow-wrap: anywhere;
-          white-space: pre-wrap;
+          white-space: normal;
+          overflow-wrap: break-word;
+          word-break: normal;
         }
 
         .verse-character {
           border-radius: 2px;
-          transition:
-            color 0.08s linear,
-            background 0.08s linear;
+          transition: color 0.08s linear, background 0.08s linear;
         }
 
         .character-correct {
@@ -1640,9 +1524,6 @@ function handleTypingKey(event: React.KeyboardEvent<HTMLTextAreaElement>) {
           font-family: "Courier New", monospace;
           font-size: 15px;
           line-height: 1.7;
-          transition:
-            border-color 0.15s ease,
-            box-shadow 0.15s ease;
         }
 
         .typing-input:focus {
@@ -1675,6 +1556,13 @@ function handleTypingKey(event: React.KeyboardEvent<HTMLTextAreaElement>) {
           line-height: 1.6;
         }
 
+        .typing-feedback {
+          margin: 0 0 10px !important;
+          color: #ff8292 !important;
+          font-size: 11px !important;
+          font-weight: 800;
+        }
+
         .character-count {
           color: #7e94ad;
           font-size: 9px;
@@ -1691,11 +1579,7 @@ function handleTypingKey(event: React.KeyboardEvent<HTMLTextAreaElement>) {
           padding: 17px;
           border: 1px solid rgba(244, 189, 79, 0.35);
           border-radius: 9px;
-          background: linear-gradient(
-            105deg,
-            rgba(244, 189, 79, 0.1),
-            rgba(11, 23, 39, 0.9)
-          );
+          background: linear-gradient(105deg, rgba(244, 189, 79, 0.1), rgba(11, 23, 39, 0.9));
         }
 
         .result-badge {
@@ -1717,7 +1601,7 @@ function handleTypingKey(event: React.KeyboardEvent<HTMLTextAreaElement>) {
         }
 
         .result-copy h3 {
-          margin: 5px 0 5px;
+          margin: 5px 0;
           color: #f3f7fc;
           font-size: 16px;
           line-height: 1.3;
@@ -1757,78 +1641,13 @@ function handleTypingKey(event: React.KeyboardEvent<HTMLTextAreaElement>) {
         }
 
         @keyframes pulse {
-          0%, 100% {
-            opacity: 1;
-          }
-          50% {
-            opacity: 0.35;
-          }
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.35; }
         }
 
         @keyframes cursor-pulse {
-          0%, 100% {
-            border-color: #f4bd4f;
-          }
-          50% {
-            border-color: transparent;
-          }
-        }
-
-        @media (max-width: 1000px) {
-          .main-grid {
-            grid-template-columns: minmax(0, 1fr) 285px;
-            gap: 12px;
-          }
-
-          .race-panel,
-          .typing-panel {
-            padding: 17px;
-          }
-
-          .garage-panel,
-          .stats-panel {
-            padding: 16px;
-          }
-
-          .track-heading,
-          .race-lane {
-            grid-template-columns: 88px minmax(0, 1fr);
-          }
-
-          .runner-label {
-            gap: 5px;
-          }
-
-          .runner-initials {
-            width: 25px;
-            min-width: 25px;
-            height: 25px;
-          }
-
-          .runner-name {
-            font-size: 8px;
-          }
-
-          .track-code {
-            margin-left: 0;
-          }
-
-          .result-card {
-            flex-wrap: wrap;
-          }
-
-          .result-copy {
-            flex-basis: calc(100% - 80px);
-          }
-
-          .result-actions {
-            width: 100%;
-            flex-direction: row;
-          }
-
-          .result-actions button {
-            flex: 1;
-          }
+          0%, 100% { border-color: #f4bd4f; }
+          50% { border-color: transparent; }
         }
 
         @media (max-width: 760px) {
@@ -1837,79 +1656,32 @@ function handleTypingKey(event: React.KeyboardEvent<HTMLTextAreaElement>) {
           }
 
           .topbar {
-            padding-bottom: 17px;
-          }
-
-          .brand-icon {
-            width: 37px;
-            height: 37px;
-            font-size: 22px;
-          }
-
-          .brand-name {
-            font-size: 15px;
-          }
-
-          .brand-subtitle {
-            font-size: 8px;
-            letter-spacing: 1.5px;
+            align-items: flex-start;
+            flex-wrap: wrap;
           }
 
           .topbar-right {
-            gap: 7px;
+            justify-content: flex-start;
           }
 
           .mode-pill {
             display: none;
           }
 
-          .profile-link {
-            padding: 8px;
-            font-size: 8px;
-            letter-spacing: 0.4px;
-          }
-
           .hero {
             min-height: 135px;
-            padding: 28px 0 22px;
-          }
-
-          .hero h1 {
-            letter-spacing: -1px;
-          }
-
-          .hero p {
-            max-width: 420px;
-            font-size: 12px;
           }
 
           .hero-mark {
-            width: 70px;
-            min-width: 70px;
-            height: 70px;
-            padding-left: 12px;
-          }
-
-          .hero-mark-line {
-            width: 40px;
-          }
-
-          .hero-mark-line.short {
-            width: 27px;
+            display: none;
           }
 
           .main-grid {
             grid-template-columns: minmax(0, 1fr);
           }
 
-          .race-panel,
           .typing-panel {
             grid-column: auto;
-          }
-
-          .sidebar {
-            display: grid;
-            grid-template-columns: minmax(0, 1fr);
           }
 
           .track-heading,
@@ -1925,29 +1697,15 @@ function handleTypingKey(event: React.KeyboardEvent<HTMLTextAreaElement>) {
 
           .runner-name {
             font-size: 8px;
-            letter-spacing: 0;
           }
 
           .track-lane {
             height: 53px;
           }
 
-          .lane-car,
-          .lane-car svg {
-            width: 80px;
-            height: 42px;
-          }
-
-          .lane-car {
-            left: calc(var(--unused, 0px));
-          }
-
-          .lane-number {
-            right: 16px;
-          }
-
-          .track-footer {
-            gap: 10px;
+          .lane-character {
+            width: 34px;
+            height: 34px;
           }
 
           .translation-pill {
@@ -1972,10 +1730,20 @@ function handleTypingKey(event: React.KeyboardEvent<HTMLTextAreaElement>) {
 
           .result-card {
             align-items: flex-start;
+            flex-wrap: wrap;
           }
 
-          .page-footer {
-            line-height: 1.7;
+          .result-copy {
+            flex-basis: calc(100% - 80px);
+          }
+
+          .result-actions {
+            width: 100%;
+            flex-direction: row;
+          }
+
+          .result-actions button {
+            flex: 1;
           }
         }
 
@@ -1986,7 +1754,6 @@ function handleTypingKey(event: React.KeyboardEvent<HTMLTextAreaElement>) {
           }
 
           .panel-heading h2,
-          .garage-panel h2,
           .stats-panel h2,
           .typing-heading h2 {
             font-size: 18px;
@@ -2014,20 +1781,10 @@ function handleTypingKey(event: React.KeyboardEvent<HTMLTextAreaElement>) {
             font-size: 7px;
           }
 
-          .lane-car,
-          .lane-car svg {
-            width: 72px;
-            height: 38px;
-          }
-
-          .result-badge {
-            width: 48px;
-            min-width: 48px;
-            height: 48px;
-          }
-
-          .result-copy h3 {
-            font-size: 14px;
+          .lane-character {
+            width: 30px;
+            height: 30px;
+            font-size: 8px;
           }
         }
       `}</style>

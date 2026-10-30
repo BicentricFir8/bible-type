@@ -5,6 +5,7 @@ import Navbar from "../components/Navbar";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "../../lib/supabase/client";
+import { CHARACTERS } from "../../lib/characters";
 
 type Race = {
   id: number;
@@ -18,7 +19,7 @@ type Race = {
 type Progress = {
   coins: number;
   xp: number;
-  owned_cars: string[];
+  owned_characters: string[];
 };
 
 function getLevel(xp: number) {
@@ -35,7 +36,7 @@ export default function DashboardPage() {
   const [progress, setProgress] = useState<Progress>({
     coins: 0,
     xp: 0,
-    owned_cars: ["blue"],
+    owned_characters: ["disciple"],
   });
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
@@ -69,7 +70,7 @@ export default function DashboardPage() {
             .order("created_at", { ascending: false }),
           supabase
             .from("player_progress")
-            .select("coins, xp, owned_cars")
+            .select("coins, xp, owned_characters")
             .eq("user_id", user.id)
             .maybeSingle(),
         ]);
@@ -87,7 +88,11 @@ export default function DashboardPage() {
           "Couldn't load your coins and XP. Please check your database permissions."
         );
       } else if (progressResult.data) {
-        setProgress(progressResult.data);
+        setProgress({
+          coins: progressResult.data.coins ?? 0,
+          xp: progressResult.data.xp ?? 0,
+          owned_characters: progressResult.data.owned_characters ?? ["disciple"],
+        });
       }
 
       setLoading(false);
@@ -124,6 +129,10 @@ export default function DashboardPage() {
   const level = getLevel(progress.xp);
   const xpInLevel = getLevelProgress(progress.xp);
 
+  const ownedCharacterCount = progress.owned_characters.filter((id) =>
+    CHARACTERS.some((character) => character.id === id)
+  ).length;
+
   if (loading) {
     return (
       <main style={styles.page}>
@@ -134,14 +143,14 @@ export default function DashboardPage() {
 
   return (
     <main style={styles.page}>
-     <Navbar />
+      <Navbar />
 
-<header style={styles.header}>
-  <span />
-  <button onClick={signOut} style={styles.signOut}>
-    Sign Out
-  </button>
-</header>
+      <header style={styles.header}>
+        <span />
+        <button onClick={signOut} style={styles.signOut}>
+          Sign Out
+        </button>
+      </header>
 
       <section style={styles.card}>
         <p style={styles.eyebrow}>PLAYER DASHBOARD</p>
@@ -197,10 +206,17 @@ export default function DashboardPage() {
             {100 - xpInLevel} XP until Level {level + 1}
           </p>
 
-          <div style={styles.ownedCars}>
-            <span>Cars owned</span>
-            <strong>{progress.owned_cars.length}</strong>
+          <div style={styles.ownedCharacters}>
+            <span>Biblical characters owned</span>
+            <strong>{ownedCharacterCount} / {CHARACTERS.length}</strong>
           </div>
+
+          <button
+            style={styles.shopButton}
+            onClick={() => router.push("/garage")}
+          >
+            VIEW CHARACTER COLLECTION
+          </button>
         </section>
 
         <div style={styles.stats}>
@@ -267,12 +283,6 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
-  },
-  logo: {
-    color: "#facc15",
-    fontSize: "26px",
-    fontWeight: 900,
-    letterSpacing: "2px",
   },
   signOut: {
     background: "#1e293b",
@@ -388,13 +398,25 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#94a3b8",
     fontSize: "12px",
   },
-  ownedCars: {
+  ownedCharacters: {
     display: "flex",
     justifyContent: "space-between",
+    gap: "12px",
     marginTop: "20px",
     paddingTop: "16px",
     borderTop: "1px solid #26364f",
     color: "#cbd5e1",
+  },
+  shopButton: {
+    width: "100%",
+    marginTop: "16px",
+    padding: "12px",
+    background: "#1e293b",
+    color: "#facc15",
+    border: "1px solid #475569",
+    borderRadius: "8px",
+    fontWeight: 900,
+    cursor: "pointer",
   },
   stats: {
     display: "grid",

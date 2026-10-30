@@ -5,34 +5,23 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Navbar from "../components/Navbar";
 import { createClient } from "../../lib/supabase/client";
+import { CHARACTERS } from "../../lib/characters";
 
 type Progress = {
   coins: number;
-  owned_cars: string[];
+  owned_characters: string[];
 };
-
-const shopCars = [
-  {
-    id: "gold",
-    name: "Gold Cruiser",
-    price: 250,
-    color: "#facc15",
-    description: "A golden upgrade for dedicated racers.",
-  },
-  {
-    id: "red",
-    name: "Red Comet",
-    price: 500,
-    color: "#f87171",
-    description: "A bold ride for serious Bible Type players.",
-  },
-];
 
 export default function ShopPage() {
   const router = useRouter();
-  const [progress, setProgress] = useState<Progress | null>(null);
+
+  const [progress, setProgress] = useState<Progress>({
+    coins: 0,
+    owned_characters: ["disciple"],
+  });
+
   const [loading, setLoading] = useState(true);
-  const [busyCar, setBusyCar] = useState("");
+  const [busyCharacter, setBusyCharacter] = useState("");
   const [message, setMessage] = useState("");
 
   useEffect(() => {
@@ -51,19 +40,17 @@ export default function ShopPage() {
 
       const { data, error } = await supabase
         .from("player_progress")
-        .select("coins, owned_cars")
+        .select("coins, owned_characters")
         .eq("user_id", user.id)
         .maybeSingle();
 
       if (error) {
         setMessage("Couldn't load your coins. Please refresh.");
-      } else {
-        setProgress(
-          data ?? {
-            coins: 0,
-            owned_cars: ["blue"],
-          }
-        );
+      } else if (data) {
+        setProgress({
+          coins: data.coins ?? 0,
+          owned_characters: data.owned_characters ?? ["disciple"],
+        });
       }
 
       setLoading(false);
@@ -72,30 +59,44 @@ export default function ShopPage() {
     loadShop();
   }, [router]);
 
-  async function buyCar(carId: string) {
-    setBusyCar(carId);
+  async function buyCharacter(characterId: string) {
+    setBusyCharacter(characterId);
     setMessage("");
 
     const supabase = createClient();
-    const { data, error } = await supabase.rpc("buy_car", {
-      p_car_id: carId,
+
+    const { data, error } = await supabase.rpc("buy_character", {
+      p_character_id: characterId,
     });
 
     if (error) {
       setMessage(error.message);
-      setBusyCar("");
+      setBusyCharacter("");
       return;
     }
 
-    setProgress({
-      coins: data.coins_remaining,
-      owned_cars: data.owned_cars,
-    });
+    if (data?.error) {
+      setMessage(data.error);
+      setBusyCharacter("");
+      return;
+    }
 
-    setMessage(
-      `${shopCars.find((car) => car.id === carId)?.name} unlocked successfully!`
+    setProgress((previous) => ({
+      coins:
+        typeof data?.total_coins === "number"
+          ? data.total_coins
+          : previous.coins,
+      owned_characters: Array.isArray(data?.owned_characters)
+        ? data.owned_characters
+        : [...previous.owned_characters, characterId],
+    }));
+
+    const character = CHARACTERS.find(
+      (item) => item.id === characterId
     );
-    setBusyCar("");
+
+    setMessage(`${character?.name ?? "Character"} unlocked successfully!`);
+    setBusyCharacter("");
   }
 
   return (
@@ -104,64 +105,108 @@ export default function ShopPage() {
 
       <section style={styles.intro}>
         <p style={styles.eyebrow}>BIBLE TYPE MARKETPLACE</p>
-        <h1 style={styles.title}>Car Shop</h1>
+        <h1 style={styles.title}>Character Shop</h1>
         <p style={styles.subtitle}>
-          Spend your race earnings on new rides.
+          Unlock biblical figures and expand your collection using coins
+          earned from racing.
         </p>
 
         {loading ? (
-          <p>Loading shop...</p>
+          <p>Loading character shop...</p>
         ) : (
           <p style={styles.balance}>
-            Your balance: <strong>{progress?.coins.toLocaleString() ?? 0} coins</strong>
+            Your balance:
+            <strong>{progress.coins.toLocaleString()} coins</strong>
           </p>
         )}
 
-        {message && <p role="status" style={styles.message}>{message}</p>}
+        {message && (
+          <p role="status" style={styles.message}>
+            {message}
+          </p>
+        )}
       </section>
 
-      <section style={styles.grid}>
-        {shopCars.map((car) => {
-          const owned = progress?.owned_cars.includes(car.id) ?? false;
+      {loading ? (
+        <p style={styles.loading}>LOADING CHARACTERS...</p>
+      ) : (
+        <section style={styles.grid}>
+          {CHARACTERS.map((character) => {
+            const owned = progress.owned_characters.includes(character.id);
 
-          return (
-            <article key={car.id} style={styles.card}>
-              <div style={styles.preview}>
-                <svg viewBox="0 0 240 120" style={{ width: "100%", maxWidth: 240 }}>
-                  <ellipse cx="120" cy="99" rx="92" ry="10" fill="#020617" opacity=".45" />
-                  <path
-                    d="M25 72 L37 51 Q42 43 57 40 L83 21 Q89 16 102 16 L145 16 Q159 17 168 31 L190 48 L207 53 Q219 58 220 72 L215 86 L24 86 Z"
-                    fill={car.color}
-                    stroke="#e2e8f0"
-                    strokeWidth="2"
-                  />
-                  <path d="M91 25 L143 25 Q153 26 161 39 L174 49 L73 49 Z" fill="#172554" />
-                  <circle cx="66" cy="85" r="19" fill="#0f172a" stroke="#94a3b8" strokeWidth="3" />
-                  <circle cx="66" cy="85" r="8" fill="#cbd5e1" />
-                  <circle cx="180" cy="85" r="19" fill="#0f172a" stroke="#94a3b8" strokeWidth="3" />
-                  <circle cx="180" cy="85" r="8" fill="#cbd5e1" />
-                </svg>
-              </div>
+            return (
+              <article key={character.id} style={styles.card}>
+                <div
+                  style={{
+                    ...styles.avatar,
+                    color: character.color,
+                    borderColor: character.color,
+                    background: `${character.color}15`,
+                  }}
+                >
+                  {character.initials}
+                </div>
 
-              <h2 style={styles.carName}>{car.name}</h2>
-              <p style={styles.description}>{car.description}</p>
-              <p style={styles.price}>{car.price} COINS</p>
+                <p
+                  style={{
+                    ...styles.rarity,
+                    color: character.color,
+                  }}
+                >
+                  {character.rarity}
+                </p>
 
-              <button
-                style={owned ? styles.ownedButton : styles.buyButton}
-                disabled={loading || owned || busyCar !== ""}
-                onClick={() => buyCar(car.id)}
-              >
-                {owned
-                  ? "ALREADY OWNED"
-                  : busyCar === car.id
-                    ? "PURCHASING..."
-                    : `BUY FOR ${car.price} COINS`}
-              </button>
-            </article>
-          );
-        })}
-      </section>
+                <h2 style={styles.characterName}>
+                  {character.name}
+                </h2>
+
+                <p style={styles.characterTitle}>
+                  {character.title}
+                </p>
+
+                <p style={styles.description}>
+                  {character.description}
+                </p>
+
+                <p style={styles.price}>
+                  {owned
+                    ? "UNLOCKED"
+                    : `${character.price.toLocaleString()} COINS`}
+                </p>
+
+                <button
+                  style={
+                    owned ? styles.ownedButton : styles.buyButton
+                  }
+                  disabled={
+                    owned ||
+                    busyCharacter !== "" ||
+                    progress.coins < character.price
+                  }
+                  onClick={() => buyCharacter(character.id)}
+                >
+                  {owned
+                    ? "ALREADY OWNED"
+                    : busyCharacter === character.id
+                      ? "UNLOCKING..."
+                      : progress.coins < character.price
+                        ? "NOT ENOUGH COINS"
+                        : `UNLOCK FOR ${character.price.toLocaleString()} COINS`}
+                </button>
+              </article>
+            );
+          })}
+        </section>
+      )}
+
+      <div style={styles.footer}>
+        <button
+          style={styles.garageButton}
+          onClick={() => router.push("/garage")}
+        >
+          VIEW YOUR CHARACTER COLLECTION
+        </button>
+      </div>
     </main>
   );
 }
@@ -176,7 +221,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   intro: {
     textAlign: "center",
-    padding: "44px 20px 24px",
+    padding: "44px 20px 30px",
   },
   eyebrow: {
     color: "#facc15",
@@ -190,10 +235,14 @@ const styles: Record<string, React.CSSProperties> = {
     margin: "10px 0",
   },
   subtitle: {
+    maxWidth: 550,
+    margin: "0 auto",
     color: "#cbd5e1",
+    lineHeight: 1.7,
   },
   balance: {
     display: "inline-flex",
+    alignItems: "center",
     gap: 8,
     padding: "12px 18px",
     background: "#172338",
@@ -203,11 +252,16 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#fde68a",
     overflowWrap: "anywhere",
   },
+  loading: {
+    padding: 50,
+    color: "#94a3b8",
+    textAlign: "center",
+  },
   grid: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
     gap: 20,
-    maxWidth: 900,
+    maxWidth: 1200,
     padding: "0 24px",
     margin: "0 auto",
   },
@@ -218,22 +272,38 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid #26364f",
     borderRadius: 18,
   },
-  preview: {
+  avatar: {
+    width: 85,
+    height: 85,
     display: "grid",
     placeItems: "center",
-    minHeight: 130,
-    background: "#0b1120",
-    borderRadius: 12,
+    margin: "0 auto 12px",
+    border: "2px solid",
+    borderRadius: "50%",
+    fontSize: 25,
+    fontWeight: 950,
   },
-  carName: {
-    marginTop: 18,
+  rarity: {
+    fontSize: 10,
+    fontWeight: 900,
+    letterSpacing: 2,
+    textTransform: "uppercase",
+  },
+  characterName: {
+    marginTop: 12,
     fontSize: 21,
+    fontWeight: 900,
+  },
+  characterTitle: {
+    color: "#e1b955",
+    fontSize: 12,
     fontWeight: 800,
   },
   description: {
-    minHeight: 40,
+    minHeight: 55,
     color: "#94a3b8",
     fontSize: 13,
+    lineHeight: 1.6,
   },
   price: {
     color: "#facc15",
@@ -258,5 +328,20 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 9,
     fontWeight: 900,
     cursor: "default",
+  },
+  garageButton: {
+    padding: "14px 22px",
+    background: "#172338",
+    color: "#facc15",
+    border: "1px solid #475569",
+    borderRadius: 9,
+    fontWeight: 900,
+    cursor: "pointer",
+  },
+  footer: {
+    display: "flex",
+    justifyContent: "center",
+    marginTop: 35,
+    padding: "0 20px",
   },
 };

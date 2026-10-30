@@ -8,8 +8,9 @@ import { createClient } from "../../lib/supabase/client";
 
 const links = [
   { label: "Start Race", href: "/", icon: "🏁" },
-  { label: "Garage", href: "/garage", icon: "🚗" },
-  { label: "Shop", href: "/shop", icon: "🛒" },
+  { label: "Characters", href: "/garage", icon: "👤" },
+  { label: "Character Shop", href: "/shop", icon: "🛒" },
+  { label: "Achievements", href: "/achievements", icon: "🏆" },
   { label: "Dashboard", href: "/dashboard", icon: "📊" },
 ];
 
@@ -56,7 +57,9 @@ export default function Navbar() {
 
       <div style={styles.links}>
         {links.map((link) => {
-          const active = pathname === link.href;
+          const active =
+            pathname === link.href ||
+            (link.href !== "/" && pathname.startsWith(link.href + "/"));
 
           return (
             <Link
@@ -163,4 +166,3 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 900,
   },
 };
-
